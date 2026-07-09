@@ -52,7 +52,6 @@ export default class App extends React.Component {
 
   drawSky(canvas) {
     if (!canvas) return;
-    const w = App.W * 0.5, h = App.H * 0.5; // tile size (haze is soft, half-res is invisible)
 
     // ── torus-wrapped fractal noise nebula: seamless across tile edges,
     //    organic and non-repeating within the tile ──
@@ -113,13 +112,13 @@ export default class App extends React.Component {
     }
     nctx.putImageData(img, 0, 0);
 
-    // blit the seamless tile 3×3 across the full world
-    canvas.width = w * 3; canvas.height = h * 3;
+    // blit the seamless tile 3×3; keep the backing store at noise resolution and
+    // let CSS stretch it to the world — mobile GPUs reject huge canvases and the
+    // haze would render cropped/glitchy
+    canvas.width = NW * 3; canvas.height = NH * 3;
     const mctx = canvas.getContext('2d');
-    mctx.imageSmoothingEnabled = true;
-    mctx.imageSmoothingQuality = 'high';
     for (let ox = 0; ox < 3; ox++) for (let oy = 0; oy < 3; oy++) {
-      mctx.drawImage(nc, ox * w, oy * h, w, h);
+      mctx.drawImage(nc, ox * NW, oy * NH);
     }
   }
 
