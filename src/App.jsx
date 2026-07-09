@@ -845,7 +845,7 @@ export default class App extends React.Component {
   }
 
   componentWillUnmount() {
-    clearInterval(this._tick); clearTimeout(this._confirmT); clearTimeout(this._ambientT); clearTimeout(this._markerT);
+    clearInterval(this._tick); clearTimeout(this._confirmT); clearTimeout(this._ambientT); clearTimeout(this._markerT); clearTimeout(this.prayBurstTimer);
     if (this._unsubSky) this._unsubSky();
     if (this._galaxyRaf) cancelAnimationFrame(this._galaxyRaf);
     window.removeEventListener('pointermove', this._onPointerPar);
@@ -1102,6 +1102,7 @@ export default class App extends React.Component {
       modalPrayers: C.prayers(openTotal),
       prayLabel: userHasPrayed ? C.prayed : C.pray,
       prayDisabled: userHasPrayed,
+      prayBurst: !!S.justPrayed,
       prayBg: userHasPrayed ? 'transparent' : 'rgba(169,165,216,0.08)',
       prayBorder: userHasPrayed ? '#2b3152' : '#4a4478',
       prayColor: userHasPrayed ? '#565d78' : '#e6e9f0',
@@ -1109,7 +1110,7 @@ export default class App extends React.Component {
       reportLabel: C.report, reportTitle: C.reportTitle,
       flagReasons, flaggedNote: C.flaggedNote,
       closeLabel: C.close, backLabel: C.back,
-      closeModal: () => this.setState({ openWishId: null, flagView: false, justFlagged: false }),
+      closeModal: () => this.setState({ openWishId: null, flagView: false, justFlagged: false, justPrayed: false }),
       startFlag: () => this.setState({ flagView: true, justFlagged: false }),
       cancelFlag: () => this.setState({ flagView: false }),
       pray: () => {
@@ -1118,8 +1119,11 @@ export default class App extends React.Component {
         if (cloud) prayForWish(open.wid); // the snapshot bumps the count for everyone
         this.setState((s) => ({
           prayedExtra: cloud ? s.prayedExtra : { ...s.prayedExtra, [open.wid]: (s.prayedExtra[open.wid] || 0) + 1 },
-          userPrayed: { ...s.userPrayed, [open.wid]: true }
+          userPrayed: { ...s.userPrayed, [open.wid]: true },
+          justPrayed: true
         }));
+        clearTimeout(this.prayBurstTimer);
+        this.prayBurstTimer = setTimeout(() => this.setState({ justPrayed: false }), 950);
       },
 
       showForm: S.showForm,
@@ -1558,7 +1562,7 @@ export default class App extends React.Component {
                   <div style={{ fontFamily: serif, fontStyle: 'italic', fontSize: 'clamp(22px, 5.5vw, 27px)', lineHeight: 1.45, color: '#edeff7', textWrap: 'pretty' }}>“{V.modalText}”</div>
                   <div style={{ fontFamily: serif, fontStyle: 'italic', fontSize: 16, color: '#8b90ab', alignSelf: 'flex-end' }}>— {V.modalBy}</div>
                   <div style={{ fontSize: 11.5, color: '#6a708c', fontStyle: 'normal' }}>{V.modalPrayers}</div>
-                  <button onClick={V.pray} disabled={V.prayDisabled} className="glow-btn" style={{ alignSelf: 'flex-start', fontSize: 12, letterSpacing: '0.1em', padding: '11px 22px', cursor: V.prayCursor, '--bg': V.prayBg, '--bc': V.prayBorder, '--c': V.prayColor }}>🌟 {V.prayLabel}</button>
+                  <button onClick={V.pray} disabled={V.prayDisabled} className={'glow-btn' + (V.prayBurst ? ' pray-burst' : '')} style={{ alignSelf: 'flex-start', fontSize: 12, letterSpacing: '0.1em', padding: '11px 22px', cursor: V.prayCursor, '--bg': V.prayBg, '--bc': V.prayBorder, '--c': V.prayColor }}>🌟 {V.prayLabel}</button>
                 </div>
               )}
 

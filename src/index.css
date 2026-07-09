@@ -93,14 +93,42 @@ textarea:focus { outline: none; }
 
 /* pray / submit / "write your wish" CTA — colors via CSS vars, purple glow on hover */
 .glow-btn {
+  position: relative;
   border-radius: 999px;
   font-family: 'Space Mono', monospace;
   background: var(--bg, rgba(169, 165, 216, 0.14));
   border: 1px solid var(--bc, #a9a5d8);
   color: var(--c, #e6e9f0);
-  transition: border-color .3s ease, box-shadow .35s ease;
+  transition: border-color .45s ease, box-shadow .35s ease, background-color .45s ease, color .45s ease, transform .25s ease;
 }
 .glow-btn:hover:not(:disabled) { border-color: #a9a5d8; box-shadow: 0 0 30px rgba(169, 165, 216, 0.3); }
+.glow-btn:active:not(:disabled) { transform: scale(0.96); }
+
+/* one-shot burst when a wish is made upon a star: warm flare + soft pop + expanding ring */
+.glow-btn.pray-burst { animation: pray-pop .9s cubic-bezier(.22, 1.4, .36, 1), pray-flare .9s ease-out; }
+.glow-btn.pray-burst::after {
+  content: '';
+  position: absolute;
+  inset: -1px;
+  border-radius: inherit;
+  border: 1px solid rgba(255, 226, 168, 0.85);
+  pointer-events: none;
+  animation: pray-ring .9s ease-out forwards;
+}
+@keyframes pray-pop {
+  0% { transform: scale(1); }
+  30% { transform: scale(1.05); }
+  100% { transform: scale(1); }
+}
+@keyframes pray-flare {
+  0% { box-shadow: 0 0 0 rgba(255, 226, 168, 0); }
+  25% { box-shadow: 0 0 32px rgba(255, 226, 168, 0.5), 0 0 60px rgba(169, 165, 216, 0.35); }
+  100% { box-shadow: 0 0 0 rgba(255, 226, 168, 0); }
+}
+@keyframes pray-ring {
+  0% { opacity: 0.9; transform: scale(1); }
+  100% { opacity: 0; transform: scale(1.5); }
+}
 
 /* lifetime pills */
 .pill-btn {
