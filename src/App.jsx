@@ -745,7 +745,7 @@ export default class App extends React.Component {
         }
       }
       if (e.button !== undefined && e.button !== 0) return;
-      if (this._pinchPointers.size >= 1 && e.pointerType === 'touch') return;
+      if (this._pinchPointers.size > 1 && e.pointerType === 'touch') return;
       this._drag = { sx: e.clientX, sy: e.clientY, cx: this._cam.x, cy: this._cam.y, moved: false };
     });
     el.addEventListener('pointermove', (e) => {
