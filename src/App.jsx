@@ -1,8 +1,14 @@
 import React from 'react';
+import {
+  firebaseEnabled, connectSky, newWishId, releaseWish, rewriteWish,
+  restWish, prayForWish, reportWish,
+} from './firebase';
 
 /*
  * LUMEN — a shared night sky where every wish becomes a star.
  * Ported from the Claude Design prototype (LUMEN.dc.html).
+ * With Firebase configured (.env.local), wishes live in a shared Firestore sky;
+ * without it, they stay in this browser's localStorage as before.
  */
 export default class App extends React.Component {
   static defaultProps = {
@@ -24,6 +30,8 @@ export default class App extends React.Component {
       prayedExtra: saved.prayedExtra || {},
       userPrayed: saved.userPrayed || {},
       userWishes: saved.userWishes || [],
+      sharedWishes: [],
+      uid: null,
       showForm: false,
       formLife: 0,
       editingWid: null,
@@ -824,6 +832,12 @@ export default class App extends React.Component {
     this._onMql = () => this.setState({ isMobile: this._mql.matches });
     this._mql.addEventListener('change', this._onMql);
     this.scheduleAmbient();
+    if (firebaseEnabled) {
+      this._unsubSky = connectSky({
+        onUser: (uid) => this.setState({ uid }),
+        onWishes: (list) => this.setState({ sharedWishes: list }),
+      });
+    }
     this._tick = setInterval(() => {
       if (this.state.showForm && this.state.cooldownUntil > Date.now() && !this.state.submitted) {
         this.setState({ now: Date.now() });
@@ -833,6 +847,7 @@ export default class App extends React.Component {
 
   componentWillUnmount() {
     clearInterval(this._tick); clearTimeout(this._confirmT); clearTimeout(this._ambientT); clearTimeout(this._markerT);
+    if (this._unsubSky) this._unsubSky();
     if (this._galaxyRaf) cancelAnimationFrame(this._galaxyRaf);
     window.removeEventListener('pointermove', this._onPointerPar);
     window.removeEventListener('deviceorientation', this._onGyro);
@@ -906,9 +921,11 @@ export default class App extends React.Component {
   ];
 
   getWishes() {
-    const { userWishes } = this.state;
+    const { userWishes, sharedWishes } = this.state;
     const now = Date.now();
-    const alive = userWishes.filter((w) => !w.expiresAt || w.expiresAt > now);
+    // shared sky (Firestore) when configured, this browser's own sky otherwise
+    const pool = firebaseEnabled ? sharedWishes.filter((w) => (w.flagCount || 0) < 3) : userWishes;
+    const alive = pool.filter((w) => !w.expiresAt || w.expiresAt > now);
     let seed = 7919;
     const rnd = () => { seed = (seed * 16807) % 2147483647; return (seed - 1) / 2147483646; };
     const TINTS = ['#e6ecff', '#ffffff', '#dbe6ff', '#c8d7ff', '#ffeccf', '#ffd9c2', '#f2f4ff'];
@@ -961,12 +978,17 @@ export default class App extends React.Component {
     const openFlagged = open ? !!S.flaggedIds[open.wid] : false;
     const userHasPrayed = open ? !!S.userPrayed[open.wid] : false;
 
+    const isSeed = (wid) => typeof wid === 'string' && wid[0] === 'w';
     const flagReasons = C.reasons.map((label) => ({
       label,
-      onClick: () => this.setState((s) => ({
-        flaggedIds: { ...s.flaggedIds, [s.openWishId]: true },
-        flagView: false, justFlagged: true
-      }))
+      onClick: () => {
+        const wid = this.state.openWishId;
+        if (firebaseEnabled && wid && !isSeed(wid)) reportWish(wid, label);
+        this.setState((s) => ({
+          flaggedIds: { ...s.flaggedIds, [s.openWishId]: true },
+          flagView: false, justFlagged: true
+        }));
+      }
     }));
 
     const inCooldown = S.cooldownUntil > S.now && !S.submitted;
@@ -990,6 +1012,9 @@ export default class App extends React.Component {
     };
 
     const mob = !!S.isMobile;
+    const myWishes = firebaseEnabled
+      ? (S.sharedWishes || []).filter((w) => w.uid && w.uid === S.uid)
+      : (S.userWishes || []);
     return {
       hudTop: mob ? 'calc(env(safe-area-inset-top, 0px) + 14px)' : '28px',
       hudSide: mob ? '16px' : '32px',
@@ -1090,8 +1115,10 @@ export default class App extends React.Component {
       cancelFlag: () => this.setState({ flagView: false }),
       pray: () => {
         if (userHasPrayed || !open) return;
+        const cloud = firebaseEnabled && !isSeed(open.wid);
+        if (cloud) prayForWish(open.wid); // the snapshot bumps the count for everyone
         this.setState((s) => ({
-          prayedExtra: { ...s.prayedExtra, [open.wid]: (s.prayedExtra[open.wid] || 0) + 1 },
+          prayedExtra: cloud ? s.prayedExtra : { ...s.prayedExtra, [open.wid]: (s.prayedExtra[open.wid] || 0) + 1 },
           userPrayed: { ...s.userPrayed, [open.wid]: true }
         }));
       },
@@ -1143,8 +1170,8 @@ export default class App extends React.Component {
       openMy: () => this.setState({ myOpen: true }),
       closeMy: () => this.setState({ myOpen: false }),
       myWrite: () => this.setState({ myOpen: false, showForm: true, submitted: false, now: Date.now() }),
-      myEmpty: (S.userWishes || []).length === 0,
-      myWishList: (S.userWishes || []).map((w) => {
+      myEmpty: myWishes.length === 0,
+      myWishList: myWishes.map((w) => {
         const expired = !!w.expiresAt && w.expiresAt <= Date.now();
         const prayed = w.base + (S.prayedExtra[w.wid] || 0);
         return {
@@ -1157,11 +1184,14 @@ export default class App extends React.Component {
           edit: () => this.setState({ myOpen: false, showForm: true, submitted: false, editingWid: w.wid, formText: w.text, formName: w.by || '', formLife: w.lifeIdx || 0, now: Date.now() }),
           askDelete: () => this.setState({ confirmDeleteWid: w.wid }),
           cancelDelete: () => this.setState({ confirmDeleteWid: null }),
-          doDelete: () => this.setState((s) => ({
-            userWishes: s.userWishes.filter((x) => x.wid !== w.wid),
-            confirmDeleteWid: null,
-            openWishId: s.openWishId === w.wid ? null : s.openWishId
-          })),
+          doDelete: () => {
+            if (firebaseEnabled) restWish(w.wid); // the snapshot removes it from state
+            this.setState((s) => ({
+              userWishes: s.userWishes.filter((x) => x.wid !== w.wid),
+              confirmDeleteWid: null,
+              openWishId: s.openWishId === w.wid ? null : s.openWishId
+            }));
+          },
           visit: expired ? null : () => {
             this.setState({ myOpen: false, openWishId: null, flagView: false, justFlagged: false });
             this._animating = true;
@@ -1194,14 +1224,15 @@ export default class App extends React.Component {
         if (!canSubmit) return;
         if (S.editingWid) {
           const lt = App.LIFETIMES[lifeSel];
+          const patch = {
+            text: S.formText.trim(),
+            by: (S.formName || '').trim(),
+            lifeIdx: lifeSel,
+            expiresAt: lt.ms ? Date.now() + lt.ms : null
+          };
+          if (firebaseEnabled) rewriteWish(S.editingWid, patch); // snapshot refreshes state
           this.setState((s) => ({
-            userWishes: s.userWishes.map((x) => x.wid === s.editingWid ? {
-              ...x,
-              text: s.formText.trim(),
-              by: (s.formName || '').trim(),
-              lifeIdx: lifeSel,
-              expiresAt: lt.ms ? Date.now() + lt.ms : null
-            } : x),
+            userWishes: s.userWishes.map((x) => x.wid === s.editingWid ? { ...x, ...patch } : x),
             showForm: false, submitted: false, formText: '', formName: '', formLife: 0,
             editingWid: null, myOpen: true
           }));
@@ -1223,16 +1254,21 @@ export default class App extends React.Component {
           if (nearest > bestScore) { bestScore = nearest; bestPos = cand; }
           if (nearest >= 170) break; // comfortably clear of every neighbour
         }
+        const cloud = firebaseEnabled && !!S.uid;
         const w = {
-          wid: 'u' + Date.now(), text: S.formText.trim(), days: 0, base: 0,
+          wid: cloud ? newWishId() : 'u' + Date.now(),
+          text: S.formText.trim(), days: 0, base: 0,
           expiresAt: App.LIFETIMES[lifeSel].ms ? Date.now() + App.LIFETIMES[lifeSel].ms : null,
           lifeIdx: lifeSel,
           by: (S.formName || '').trim(),
           l: bestPos.l, t: bestPos.t,
           tint: TINTS[Math.floor(Math.random() * TINTS.length)]
         };
+        // cloud: Firestore's latency compensation echoes the write into the
+        // snapshot immediately, so the launch animation finds its star
+        if (cloud) releaseWish(w.wid, S.uid, w);
         this.setState((s) => ({
-          userWishes: s.userWishes.concat(w),
+          userWishes: cloud ? s.userWishes : s.userWishes.concat(w),
           showForm: false, submitted: false, formText: '', formName: '', formLife: 0,
           launchHideWid: w.wid, launchMarkerWid: null,
           cooldownUntil: Date.now() + 4 * 60 * 1000
@@ -1345,7 +1381,7 @@ export default class App extends React.Component {
                     <div style={{ fontFamily: mono, fontSize: 11, color: '#565d78', letterSpacing: '0.08em' }}>Last updated — July 2026</div>
                     <div style={{ display: 'flex', flexDirection: 'column', gap: 10 }}>
                       <div style={{ fontFamily: mono, fontSize: 11, letterSpacing: '0.18em', color: '#8b90ab' }}>WHAT WE COLLECT</div>
-                      <div style={{ fontFamily: mono, fontSize: 12.5, lineHeight: 1.8, color: '#a9adc4' }}>Only what you choose to release: the text of your wish and, if you add one, a signature. There are no accounts, no email addresses, no profiles. We do not collect your location, contacts, or identity.</div>
+                      <div style={{ fontFamily: mono, fontSize: 12.5, lineHeight: 1.8, color: '#a9adc4' }}>Only what you choose to release: the text of your wish and, if you add one, a signature. There are no accounts, no email addresses, no profiles. We do not collect your location, contacts, or identity. So that only you can edit your own stars, your browser holds an anonymous session ID — a random number that says nothing about who you are.</div>
                     </div>
                     <div style={{ display: 'flex', flexDirection: 'column', gap: 10 }}>
                       <div style={{ fontFamily: mono, fontSize: 11, letterSpacing: '0.18em', color: '#8b90ab' }}>WHAT IS PUBLIC</div>

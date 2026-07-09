@@ -1,0 +1,70 @@
+rules_version = '2';
+
+// LUMEN shared sky — paste into Firebase console → Firestore Database → Rules.
+// Visitors sign in anonymously; each wish belongs to the uid that released it.
+service cloud.firestore {
+  match /databases/{database}/documents {
+
+    match /wishes/{wid} {
+      // the sky is public
+      allow read: if true;
+
+      // release a wish: owned by the writer, validated, counters start at zero
+      allow create: if request.auth != null
+        && request.resource.data.uid == request.auth.uid
+        && request.resource.data.text is string
+        && request.resource.data.text.size() > 0
+        && request.resource.data.text.size() <= 200
+        && request.resource.data.by is string
+        && request.resource.data.by.size() <= 40
+        && request.resource.data.l is number
+        && request.resource.data.l >= 0 && request.resource.data.l <= 100
+        && request.resource.data.t is number
+        && request.resource.data.t >= 0 && request.resource.data.t <= 100
+        && request.resource.data.tint is string
+        && request.resource.data.tint.size() <= 9
+        && (request.resource.data.expiresAt == null || request.resource.data.expiresAt is number)
+        && request.resource.data.lifeIdx is number
+        && request.resource.data.prayers == 0
+        && request.resource.data.flagCount == 0;
+
+      allow update: if request.auth != null && (
+        // owner rewrites their own star (text / signature / lifetime only)
+        (
+          resource.data.uid == request.auth.uid
+          && request.resource.data.diff(resource.data).affectedKeys()
+               .hasOnly(['text', 'by', 'expiresAt', 'lifeIdx'])
+          && request.resource.data.text is string
+          && request.resource.data.text.size() > 0
+          && request.resource.data.text.size() <= 200
+          && request.resource.data.by is string
+          && request.resource.data.by.size() <= 40
+          && (request.resource.data.expiresAt == null || request.resource.data.expiresAt is number)
+          && request.resource.data.lifeIdx is number
+        )
+        // anyone may add exactly one prayer at a time
+        || (
+          request.resource.data.diff(resource.data).affectedKeys().hasOnly(['prayers'])
+          && request.resource.data.prayers == resource.data.prayers + 1
+        )
+        // anyone may add exactly one flag at a time
+        || (
+          request.resource.data.diff(resource.data).affectedKeys().hasOnly(['flagCount'])
+          && request.resource.data.flagCount == resource.data.flagCount + 1
+        )
+      );
+
+      // only the owner can let their star rest
+      allow delete: if request.auth != null && resource.data.uid == request.auth.uid;
+    }
+
+    // write-only report log for human moderation (read it from the console)
+    match /reports/{rid} {
+      allow create: if request.auth != null
+        && request.resource.data.wid is string
+        && request.resource.data.reason is string
+        && request.resource.data.reason.size() <= 40;
+      allow read, update, delete: if false;
+    }
+  }
+}
